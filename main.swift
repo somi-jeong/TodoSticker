@@ -447,6 +447,8 @@ struct TodoRow: View {
 struct StickyView: View {
     @ObservedObject var store: TodoStore
     @ObservedObject var sync: SyncEngine
+    var onCollapseChange: (Bool) -> Void = { _ in }
+    @State private var collapsed = UserDefaults.standard.bool(forKey: "collapsed")
     @State private var newText = ""
     @State private var today = Date()
     @FocusState private var inputFocused: Bool
@@ -508,12 +510,24 @@ struct StickyView: View {
                         .font(.system(size: 10))
                         .foregroundColor(.black.opacity(0.4))
                 }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.3))
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.bottom, collapsed ? 10 : 6)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                collapsed.toggle()
+                UserDefaults.standard.set(collapsed, forKey: "collapsed")
+                onCollapseChange(collapsed)
+            }
 
-            if store.todos.isEmpty {
+            if collapsed {
+                EmptyView()
+            } else if store.todos.isEmpty {
                 Spacer()
                 Text("아래에 할 일을 입력하세요")
                     .font(.system(size: 11))
@@ -541,28 +555,30 @@ struct StickyView: View {
                 .scrollContentBackground(.hidden)
             }
 
-            Divider().opacity(0.3)
+            if !collapsed {
+                Divider().opacity(0.3)
 
-            HStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11))
-                    .foregroundColor(.black.opacity(0.4))
-                TextField("추가하고 Enter", text: $newText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .focused($inputFocused)
-                    .onSubmit {
-                        let text = newText.trimmingCharacters(in: .whitespaces)
-                        guard !text.isEmpty else { return }
-                        store.todos.append(Todo(text: text))
-                        newText = ""
-                        inputFocused = true
-                    }
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11))
+                        .foregroundColor(.black.opacity(0.4))
+                    TextField("추가하고 Enter", text: $newText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .focused($inputFocused)
+                        .onSubmit {
+                            let text = newText.trimmingCharacters(in: .whitespaces)
+                            guard !text.isEmpty else { return }
+                            store.todos.append(Todo(text: text))
+                            newText = ""
+                            inputFocused = true
+                        }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
         }
-        .frame(minWidth: 200, minHeight: 160)
+        .frame(minWidth: 200, minHeight: collapsed ? 0 : 160)
         .background(
             LinearGradient(colors: [paper, paperDark],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -636,7 +652,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.minSize = NSSize(width: 200, height: 160)
         panel.setFrameAutosaveName("TodoStickerPanel")
 
-        panel.contentView = NSHostingView(rootView: StickyView(store: store, sync: engine))
+        panel.contentView = NSHostingView(rootView: StickyView(store: store, sync: engine) { [weak self] collapsed in
+            self?.setCollapsed(collapsed)
+        })
+
+        if UserDefaults.standard.bool(forKey: "collapsed") {
+            setCollapsed(true, animate: false)
+        }
+    }
+
+    private let collapsedHeight: CGFloat = 36
+
+    func setCollapsed(_ collapsed: Bool, animate: Bool = true) {
+        let frame = panel.frame
+        if collapsed {
+            if frame.height > collapsedHeight + 1 {
+                UserDefaults.standard.set(Double(frame.height), forKey: "expandedHeight")
+            }
+            panel.minSize = NSSize(width: 200, height: collapsedHeight)
+            let newFrame = NSRect(x: frame.minX, y: frame.maxY - collapsedHeight,
+                                  width: frame.width, height: collapsedHeight)
+            panel.setFrame(newFrame, display: true, animate: animate)
+        } else {
+            let saved = CGFloat(UserDefaults.standard.double(forKey: "expandedHeight"))
+            let height = saved > 100 ? saved : 320
+            let newFrame = NSRect(x: frame.minX, y: frame.maxY - height,
+                                  width: frame.width, height: height)
+            panel.setFrame(newFrame, display: true, animate: animate)
+            panel.minSize = NSSize(width: 200, height: 160)
+        }
     }
 
     @objc func statusClicked() {
