@@ -444,11 +444,15 @@ struct TodoRow: View {
     }
 }
 
+final class UIState: ObservableObject {
+    @Published var collapsed = UserDefaults.standard.bool(forKey: "collapsed")
+}
+
 struct StickyView: View {
     @ObservedObject var store: TodoStore
     @ObservedObject var sync: SyncEngine
+    @ObservedObject var ui: UIState
     var onCollapseChange: (Bool) -> Void = { _ in }
-    @State private var collapsed = UserDefaults.standard.bool(forKey: "collapsed")
     @State private var newText = ""
     @State private var today = Date()
     @FocusState private var inputFocused: Bool
@@ -513,19 +517,18 @@ struct StickyView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(.black.opacity(0.3))
-                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+                    .rotationEffect(.degrees(ui.collapsed ? -90 : 0))
+                    .animation(.easeOut(duration: 0.15), value: ui.collapsed)
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
-            .padding(.bottom, collapsed ? 10 : 6)
+            .padding(.bottom, ui.collapsed ? 10 : 6)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                collapsed.toggle()
-                UserDefaults.standard.set(collapsed, forKey: "collapsed")
-                onCollapseChange(collapsed)
+                onCollapseChange(!ui.collapsed)
             }
 
-            if collapsed {
+            if ui.collapsed {
                 EmptyView()
             } else if store.todos.isEmpty {
                 Spacer()
@@ -553,9 +556,10 @@ struct StickyView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .transition(.opacity)
             }
 
-            if !collapsed {
+            if !ui.collapsed {
                 Divider().opacity(0.3)
 
                 HStack(spacing: 6) {
@@ -576,9 +580,10 @@ struct StickyView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
+                .transition(.opacity)
             }
         }
-        .frame(minWidth: 200, minHeight: collapsed ? 0 : 160)
+        .frame(minWidth: 200, minHeight: ui.collapsed ? 0 : 160)
         .background(
             LinearGradient(colors: [paper, paperDark],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -605,6 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: StickyPanel!
     var syncTimer: Timer?
     let store = TodoStore()
+    let uiState = UIState()
     var engine: SyncEngine!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -652,7 +658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.minSize = NSSize(width: 200, height: 160)
         panel.setFrameAutosaveName("TodoStickerPanel")
 
-        panel.contentView = NSHostingView(rootView: StickyView(store: store, sync: engine) { [weak self] collapsed in
+        panel.contentView = NSHostingView(rootView: StickyView(store: store, sync: engine, ui: uiState) { [weak self] collapsed in
             self?.setCollapsed(collapsed)
         })
 
@@ -664,7 +670,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let collapsedHeight: CGFloat = 36
 
     func setCollapsed(_ collapsed: Bool, animate: Bool = true) {
+        UserDefaults.standard.set(collapsed, forKey: "collapsed")
         let frame = panel.frame
+
         if collapsed {
             if frame.height > collapsedHeight + 1 {
                 UserDefaults.standard.set(Double(frame.height), forKey: "expandedHeight")
@@ -672,14 +680,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.minSize = NSSize(width: 200, height: collapsedHeight)
             let newFrame = NSRect(x: frame.minX, y: frame.maxY - collapsedHeight,
                                   width: frame.width, height: collapsedHeight)
-            panel.setFrame(newFrame, display: true, animate: animate)
+            // 내용 먼저 사라지고 창이 줄어듦
+            withAnimation(.easeOut(duration: 0.12)) { uiState.collapsed = true }
+            if animate {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    panel.animator().setFrame(newFrame, display: true)
+                }
+            } else {
+                panel.setFrame(newFrame, display: true)
+            }
         } else {
             let saved = CGFloat(UserDefaults.standard.double(forKey: "expandedHeight"))
             let height = saved > 100 ? saved : 320
             let newFrame = NSRect(x: frame.minX, y: frame.maxY - height,
                                   width: frame.width, height: height)
-            panel.setFrame(newFrame, display: true, animate: animate)
             panel.minSize = NSSize(width: 200, height: 160)
+            // 창이 먼저 커지고 나서 내용이 페이드인
+            if animate {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.2
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    self.panel.animator().setFrame(newFrame, display: true)
+                }, completionHandler: { [weak self] in
+                    guard let self else { return }
+                    withAnimation(.easeIn(duration: 0.15)) { self.uiState.collapsed = false }
+                })
+            } else {
+                panel.setFrame(newFrame, display: true)
+                uiState.collapsed = false
+            }
         }
     }
 
