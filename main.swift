@@ -81,7 +81,17 @@ struct TodoRow: View {
 struct StickyView: View {
     @ObservedObject var store: TodoStore
     @State private var newText = ""
+    @State private var today = Date()
     @FocusState private var inputFocused: Bool
+
+    private static let titleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = "yyyy.MM.dd (E) 할 일"
+        return f
+    }()
+
+    private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private let paper = Color(red: 1.0, green: 0.96, blue: 0.72)
     private let paperDark = Color(red: 0.98, green: 0.90, blue: 0.45)
@@ -93,9 +103,14 @@ struct StickyView: View {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
                     .foregroundColor(.orange.opacity(0.7))
-                Text("할 일")
+                Text(Self.titleFormatter.string(from: today))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.black.opacity(0.6))
+                    .onReceive(minuteTimer) { now in
+                        if !Calendar.current.isDate(now, inSameDayAs: today) {
+                            today = now
+                        }
+                    }
                 Spacer()
                 if !store.todos.isEmpty {
                     Text("\(store.todos.filter { !$0.done }.count)/\(store.todos.count)")
