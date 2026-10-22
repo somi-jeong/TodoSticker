@@ -1,3 +1,9 @@
-TodoSticker
-*.log
+# Build outputs (produced by ./build.sh)
+/TodoSticker
+/Todo Sticker.app/Contents/MacOS/
+/Todo Sticker.app/Contents/_CodeSignature/
+# Info.plist inside the bundle is hand-written source and stays tracked.
+
+# macOS / misc
 .DS_Store
+*.log

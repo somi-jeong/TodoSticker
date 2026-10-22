@@ -393,6 +393,25 @@ final class SyncEngine: ObservableObject {
     }
 }
 
+// MARK: - Constants
+
+/// Window geometry shared by the SwiftUI view and the NSPanel.
+enum Layout {
+    static let defaultSize = NSSize(width: 240, height: 320)
+    static let minWidth: CGFloat = 200
+    static let minExpandedHeight: CGFloat = 160
+    static let collapsedHeight: CGFloat = 36
+    static let screenMargin: CGFloat = 24
+    static let cornerRadius: CGFloat = 10
+}
+
+/// UserDefaults keys.
+enum DefaultsKey {
+    static let collapsed = "collapsed"
+    static let expandedHeight = "expandedHeight"
+    static let panelAutosave = "TodoStickerPanel"
+}
+
 // MARK: - Views
 
 struct TodoRow: View {
@@ -445,7 +464,7 @@ struct TodoRow: View {
 }
 
 final class UIState: ObservableObject {
-    @Published var collapsed = UserDefaults.standard.bool(forKey: "collapsed")
+    @Published var collapsed = UserDefaults.standard.bool(forKey: DefaultsKey.collapsed)
 }
 
 struct StickyView: View {
@@ -583,14 +602,14 @@ struct StickyView: View {
                 .transition(.opacity)
             }
         }
-        .frame(minWidth: 200, minHeight: ui.collapsed ? 0 : 160)
+        .frame(minWidth: Layout.minWidth, minHeight: ui.collapsed ? 0 : Layout.minExpandedHeight)
         .background(
             LinearGradient(colors: [paper, paperDark],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
                 .stroke(Color.black.opacity(0.1), lineWidth: 0.5)
         )
         .preferredColorScheme(.light)
@@ -636,9 +655,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makePanel() {
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let size = NSSize(width: 240, height: 320)
-        let origin = NSPoint(x: screen.maxX - size.width - 24,
-                             y: screen.maxY - size.height - 24)
+        let size = Layout.defaultSize
+        let origin = NSPoint(x: screen.maxX - size.width - Layout.screenMargin,
+                             y: screen.maxY - size.height - Layout.screenMargin)
 
         panel = StickyPanel(
             contentRect: NSRect(origin: origin, size: size),
@@ -655,31 +674,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.minSize = NSSize(width: 200, height: 160)
-        panel.setFrameAutosaveName("TodoStickerPanel")
+        panel.minSize = NSSize(width: Layout.minWidth, height: Layout.minExpandedHeight)
+        panel.setFrameAutosaveName(DefaultsKey.panelAutosave)
 
         panel.contentView = NSHostingView(rootView: StickyView(store: store, sync: engine, ui: uiState) { [weak self] collapsed in
             self?.setCollapsed(collapsed)
         })
 
-        if UserDefaults.standard.bool(forKey: "collapsed") {
+        if UserDefaults.standard.bool(forKey: DefaultsKey.collapsed) {
             setCollapsed(true, animate: false)
         }
     }
 
-    private let collapsedHeight: CGFloat = 36
+    // MARK: Collapse / expand
 
     func setCollapsed(_ collapsed: Bool, animate: Bool = true) {
-        UserDefaults.standard.set(collapsed, forKey: "collapsed")
+        UserDefaults.standard.set(collapsed, forKey: DefaultsKey.collapsed)
         let frame = panel.frame
 
         if collapsed {
-            if frame.height > collapsedHeight + 1 {
-                UserDefaults.standard.set(Double(frame.height), forKey: "expandedHeight")
+            if frame.height > Layout.collapsedHeight + 1 {
+                UserDefaults.standard.set(Double(frame.height), forKey: DefaultsKey.expandedHeight)
             }
-            panel.minSize = NSSize(width: 200, height: collapsedHeight)
-            let newFrame = NSRect(x: frame.minX, y: frame.maxY - collapsedHeight,
-                                  width: frame.width, height: collapsedHeight)
+            panel.minSize = NSSize(width: Layout.minWidth, height: Layout.collapsedHeight)
+            let newFrame = NSRect(x: frame.minX, y: frame.maxY - Layout.collapsedHeight,
+                                  width: frame.width, height: Layout.collapsedHeight)
             // 내용 먼저 사라지고 창이 줄어듦
             withAnimation(.easeOut(duration: 0.12)) { uiState.collapsed = true }
             if animate {
@@ -692,11 +711,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 panel.setFrame(newFrame, display: true)
             }
         } else {
-            let saved = CGFloat(UserDefaults.standard.double(forKey: "expandedHeight"))
-            let height = saved > 100 ? saved : 320
+            let saved = CGFloat(UserDefaults.standard.double(forKey: DefaultsKey.expandedHeight))
+            let height = saved > 100 ? saved : Layout.defaultSize.height
             let newFrame = NSRect(x: frame.minX, y: frame.maxY - height,
                                   width: frame.width, height: height)
-            panel.minSize = NSSize(width: 200, height: 160)
+            panel.minSize = NSSize(width: Layout.minWidth, height: Layout.minExpandedHeight)
             // 창이 먼저 커지고 나서 내용이 페이드인
             if animate {
                 NSAnimationContext.runAnimationGroup({ ctx in
@@ -713,6 +732,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+
+    // MARK: Status item actions
 
     @objc func statusClicked() {
         if let event = NSApp.currentEvent, event.type == .rightMouseUp {
